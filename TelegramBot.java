@@ -17,8 +17,8 @@ import java.util.stream.Collectors;
 
 public class TelegramBot {
 
-    // Hardcoded fallback token:
-    private static final String HARDCODED_BOT_TOKEN = "8504490832:AAGnpqMIXfzaOYP4-j8saQ6gEH4zx_JtIkM";
+    // Token is loaded strictly from environment variable BOT_TOKEN or local .env file
+    private static final String HARDCODED_BOT_TOKEN = "";
 
     private static final String TELEGRAM_API_BASE = "https://api.telegram.org/bot";
     private static final File BOT_USERS_FILE = new File("bot_users.json");

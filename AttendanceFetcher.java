@@ -28,10 +28,10 @@ public class AttendanceFetcher {
     private static final File SESSION_FILE = new File(".cgc_session.json");
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    // High-performance shared HTTP client with persistent connection pool & HTTP/2
+    // Reliable HTTP/1.1 client with persistent connection pool (compatible with IIS / ASP.NET)
     private static final HttpClient SHARED_CLIENT = HttpClient.newBuilder()
-            .version(HttpClient.Version.HTTP_2)
-            .connectTimeout(Duration.ofSeconds(10))
+            .version(HttpClient.Version.HTTP_1_1)
+            .connectTimeout(Duration.ofSeconds(20))
             .followRedirects(HttpClient.Redirect.ALWAYS)
             .build();
 
@@ -93,8 +93,9 @@ public class AttendanceFetcher {
         this.cookieManager.setCookiePolicy(CookiePolicy.ACCEPT_ALL);
 
         this.client = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
                 .cookieHandler(this.cookieManager)
-                .connectTimeout(Duration.ofSeconds(10))
+                .connectTimeout(Duration.ofSeconds(20))
                 .followRedirects(HttpClient.Redirect.ALWAYS)
                 .build();
     }
@@ -122,9 +123,9 @@ public class AttendanceFetcher {
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(ATTENDANCE_PAGE_URL))
-                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
                     .header("Cookie", cookieHeader)
-                    .timeout(Duration.ofSeconds(8))
+                    .timeout(Duration.ofSeconds(15))
                     .GET()
                     .build();
 
@@ -176,8 +177,8 @@ public class AttendanceFetcher {
             // 1. Fetch ASP.NET Tokens
             HttpRequest getLogin = HttpRequest.newBuilder()
                     .uri(URI.create(LOGIN_URL))
-                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-                    .timeout(Duration.ofSeconds(10))
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    .timeout(Duration.ofSeconds(25))
                     .GET()
                     .build();
 
@@ -204,8 +205,8 @@ public class AttendanceFetcher {
             HttpRequest postLogin = HttpRequest.newBuilder()
                     .uri(URI.create(LOGIN_URL))
                     .header("Content-Type", "application/x-www-form-urlencoded")
-                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-                    .timeout(Duration.ofSeconds(10))
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    .timeout(Duration.ofSeconds(25))
                     .POST(HttpRequest.BodyPublishers.ofString(formBody))
                     .build();
 
@@ -214,8 +215,8 @@ public class AttendanceFetcher {
             // 3. Fetch Attendance Page
             HttpRequest getAttendancePage = HttpRequest.newBuilder()
                     .uri(URI.create(ATTENDANCE_PAGE_URL))
-                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-                    .timeout(Duration.ofSeconds(10))
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    .timeout(Duration.ofSeconds(25))
                     .GET()
                     .build();
 

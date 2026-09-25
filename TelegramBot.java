@@ -142,7 +142,7 @@ public class TelegramBot {
         } else if (text.equalsIgnoreCase("/logout") || text.equalsIgnoreCase("🚪 Logout")) {
             handleLogout(chatId);
         } else if (text.equalsIgnoreCase("🔐 Login")) {
-            sendMessage(chatId, "🔐 *How to Login:*\n\nSend your credentials in this format:\n`/login <RollNumber> <Password>`\n\n_Example:_\n`/login 2405039189 Dhroov@123`\n\n🔒 _Your password message will be auto-deleted immediately from chat for security!_");
+            sendMessage(chatId, "🔐 *How to Login:*\n\nSend your credentials in this format:\n`/login <RollNumber> <Password>`\n\n_Example:_\n`/login 2300000000 Pass@123`\n\n🔒 _Your password message will be auto-deleted immediately from chat for security!_");
         } else {
             sendMessage(chatId, "❓ *Unrecognized command.* Use the buttons below or send `/att` to check your attendance.");
         }
@@ -169,7 +169,7 @@ public class TelegramBot {
 
         String[] parts = text.split("\\s+");
         if (parts.length < 3) {
-            sendMessage(chatId, "⚠️ *Invalid Format!*\nUsage: `/login <RollNumber> <Password>`\nExample: `/login 2405039189 MyPass123`");
+            sendMessage(chatId, "⚠️ *Invalid Format!*\nUsage: `/login <RollNumber> <Password>`\nExample: `/login 2300000000 Pass@123`");
             return;
         }
 

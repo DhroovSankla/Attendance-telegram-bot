@@ -1,0 +1,28 @@
+# Sensitive configuration & Secrets
+.env
+*.env.local
+
+# Stored User Logins and Cache
+bot_users.json
+.cgc_session.json
+
+# Compiled Java Class Files
+*.class
+bin/
+out/
+target/
+
+# Log files
+*.log
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+
+# OS specific files
+.DS_Store
+Thumbs.db

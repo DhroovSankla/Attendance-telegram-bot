@@ -1,0 +1,4 @@
+.git
+*.class
+bot_users.json
+.cgc_session.json

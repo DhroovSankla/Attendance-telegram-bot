@@ -28,6 +28,13 @@ public class AttendanceFetcher {
     private static final File SESSION_FILE = new File(".cgc_session.json");
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    // High-performance shared HTTP client with persistent connection pool & HTTP/2
+    private static final HttpClient SHARED_CLIENT = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_2)
+            .connectTimeout(Duration.ofSeconds(10))
+            .followRedirects(HttpClient.Redirect.ALWAYS)
+            .build();
+
     private final HttpClient client;
     private final CookieManager cookieManager;
 
@@ -87,7 +94,7 @@ public class AttendanceFetcher {
 
         this.client = HttpClient.newBuilder()
                 .cookieHandler(this.cookieManager)
-                .connectTimeout(Duration.ofSeconds(15))
+                .connectTimeout(Duration.ofSeconds(10))
                 .followRedirects(HttpClient.Redirect.ALWAYS)
                 .build();
     }
@@ -96,9 +103,6 @@ public class AttendanceFetcher {
         return cookieManager;
     }
 
-    /**
-     * Restore cookies into this fetcher's cookie store.
-     */
     public void setCookies(List<HttpCookie> cookies) {
         for (HttpCookie c : cookies) {
             URI uri = URI.create("https://student.cgc.ac.in");
@@ -107,14 +111,46 @@ public class AttendanceFetcher {
     }
 
     /**
-     * Fetch dashboard using existing/restored session cookies.
+     * Ultra-fast direct fetch using cached cookies via Shared Client
      */
+    public static AttendanceReport fastFetchWithCookies(List<HttpCookie> cookies) {
+        AttendanceReport report = new AttendanceReport();
+        try {
+            String cookieHeader = cookies.stream()
+                    .map(c -> c.getName() + "=" + c.getValue())
+                    .collect(Collectors.joining("; "));
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(ATTENDANCE_PAGE_URL))
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                    .header("Cookie", cookieHeader)
+                    .timeout(Duration.ofSeconds(8))
+                    .GET()
+                    .build();
+
+            HttpResponse<String> res = SHARED_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+            String body = res.body();
+
+            if (res.statusCode() == 200 && isDashboardPage(body)) {
+                parseDashboardStatic(body, report);
+                report.success = true;
+                report.sessionCookies = cookies;
+                return report;
+            }
+        } catch (Exception e) {
+            report.errorMessage = "Fast fetch error: " + e.getMessage();
+        }
+        report.success = false;
+        return report;
+    }
+
     public AttendanceReport fetchWithCurrentSession() {
         AttendanceReport report = new AttendanceReport();
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(ATTENDANCE_PAGE_URL))
                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                    .timeout(Duration.ofSeconds(10))
                     .GET()
                     .build();
 
@@ -134,9 +170,6 @@ public class AttendanceFetcher {
         return report;
     }
 
-    /**
-     * Perform full login and fetch.
-     */
     public AttendanceReport loginAndFetch(String username, String password) {
         AttendanceReport report = new AttendanceReport();
         try {
@@ -144,6 +177,7 @@ public class AttendanceFetcher {
             HttpRequest getLogin = HttpRequest.newBuilder()
                     .uri(URI.create(LOGIN_URL))
                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                    .timeout(Duration.ofSeconds(10))
                     .GET()
                     .build();
 
@@ -171,6 +205,7 @@ public class AttendanceFetcher {
                     .uri(URI.create(LOGIN_URL))
                     .header("Content-Type", "application/x-www-form-urlencoded")
                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                    .timeout(Duration.ofSeconds(10))
                     .POST(HttpRequest.BodyPublishers.ofString(formBody))
                     .build();
 
@@ -180,6 +215,7 @@ public class AttendanceFetcher {
             HttpRequest getAttendancePage = HttpRequest.newBuilder()
                     .uri(URI.create(ATTENDANCE_PAGE_URL))
                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                    .timeout(Duration.ofSeconds(10))
                     .GET()
                     .build();
 
@@ -202,11 +238,15 @@ public class AttendanceFetcher {
         }
     }
 
-    private boolean isDashboardPage(String html) {
+    private static boolean isDashboardPage(String html) {
         return html.contains("Attendance") && (html.contains("Overall") || html.contains("%") || html.contains("Subject"));
     }
 
     private void parseDashboard(String html, AttendanceReport report) {
+        parseDashboardStatic(html, report);
+    }
+
+    private static void parseDashboardStatic(String html, AttendanceReport report) {
         Document doc = Jsoup.parse(html);
 
         // 1. Overall Attendance
@@ -240,7 +280,6 @@ public class AttendanceFetcher {
 
                 String time = timeMatcher.group(1).trim();
 
-                // Walk up to find the enclosing lecture card/row
                 Element card = el;
                 while (card != null && card != todayContainer) {
                     String ct = card.text();
@@ -256,7 +295,6 @@ public class AttendanceFetcher {
 
                 String cardText = card.text();
 
-                // Check for Present / Absent
                 String status = "Absent";
                 if (cardText.contains("Present") || 
                     card.select("span:contains(Present), div:contains(Present), .badge-success, [style*='green']").size() > 0) {
@@ -265,7 +303,6 @@ public class AttendanceFetcher {
                     status = "Absent";
                 }
 
-                // Extract Subject Name
                 String subject = "N/A";
                 Matcher subMatcher = Pattern.compile("([A-Za-z0-9\\-\\s&]{2,30}\\s*\\([TLW0-9]+\\))").matcher(cardText);
                 if (subMatcher.find()) {
@@ -313,8 +350,7 @@ public class AttendanceFetcher {
                         c.setPath(cNode.path("path").asText("/"));
                         cookies.add(c);
                     }
-                    fetcher.setCookies(cookies);
-                    AttendanceReport cachedReport = fetcher.fetchWithCurrentSession();
+                    AttendanceReport cachedReport = fastFetchWithCookies(cookies);
                     if (cachedReport.success) {
                         System.out.println("⚡ Logged in instantly using cached session!");
                         printCliReport(cachedReport);

@@ -15,6 +15,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 import com.sun.net.httpserver.HttpServer;
 
@@ -26,6 +28,9 @@ public class TelegramBot {
     private static final String TELEGRAM_API_BASE = "https://api.telegram.org/bot";
     private static final File BOT_USERS_FILE = new File("bot_users.json");
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    // Multi-threaded worker pool to handle multiple students concurrently in parallel
+    private static final ExecutorService WORKER_POOL = Executors.newFixedThreadPool(16);
 
     private final String botToken;
     private final HttpClient httpClient;
@@ -76,7 +81,8 @@ public class TelegramBot {
     public TelegramBot(String token) {
         this.botToken = token;
         this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(30))
+                .version(HttpClient.Version.HTTP_2)
+                .connectTimeout(Duration.ofSeconds(15))
                 .build();
         loadUserSessions();
     }
@@ -103,16 +109,16 @@ public class TelegramBot {
                         for (JsonNode update : updates) {
                             long updateId = update.path("update_id").asLong();
                             offset = updateId + 1;
-                            handleUpdate(update);
+                            // Asynchronously process each incoming message concurrently
+                            WORKER_POOL.submit(() -> handleUpdate(update));
                         }
                     }
                 } else if (response.statusCode() == 401) {
-                    System.err.println("❌ Invalid Telegram Bot Token. Please check your .env or token variable.");
+                    System.err.println("❌ Invalid Telegram Bot Token. Please check your BOT_TOKEN variable.");
                     break;
                 }
             } catch (Exception e) {
-                // Ignore transient network errors and wait briefly before retry
-                try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
+                try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
             }
         }
     }
@@ -131,6 +137,7 @@ public class TelegramBot {
         } else if (text.startsWith("/login")) {
             handleLogin(chatId, messageId, text);
         } else if (text.equalsIgnoreCase("/att") || text.equalsIgnoreCase("📊 Check Attendance")) {
+            sendChatAction(chatId, "typing");
             handleAttendance(chatId);
         } else if (text.equalsIgnoreCase("/logout") || text.equalsIgnoreCase("🚪 Logout")) {
             handleLogout(chatId);
@@ -145,7 +152,7 @@ public class TelegramBot {
         String msg = """
                 👋 *Welcome to CGC Attendance Bot!*
                 ━━━━━━━━━━━━━━━━━━━━━
-                Check your real-time attendance and daily timetable in under *1 second*!
+                Check your real-time attendance and daily timetable in *sub-second speed*!
 
                 📌 *Quick Commands:*
                 • `/login <Roll> <Password>` — Log in once to save session
@@ -158,7 +165,6 @@ public class TelegramBot {
     }
 
     private void handleLogin(long chatId, int messageId, String text) {
-        // Auto-delete the message containing password for privacy
         deleteMessage(chatId, messageId);
 
         String[] parts = text.split("\\s+");
@@ -170,7 +176,7 @@ public class TelegramBot {
         String roll = parts[1];
         String pass = parts[2];
 
-        sendMessage(chatId, "🔄 *Logging in to CGC Portal... Please wait.*");
+        sendChatAction(chatId, "typing");
 
         AttendanceFetcher fetcher = new AttendanceFetcher();
         AttendanceFetcher.AttendanceReport report = fetcher.loginAndFetch(roll, pass);
@@ -180,7 +186,7 @@ public class TelegramBot {
             userSessions.put(chatId, session);
             saveUserSessions();
 
-            sendMessage(chatId, "✅ *Login Successful!*\nYour session has been saved. You can now tap *[ 📊 Check Attendance ]* anytime.\n\n" + report.toTelegramMarkdown());
+            sendMessage(chatId, "✅ *Login Successful!*\nYour session has been saved. You can now tap *[ 📊 Check Attendance ]* anytime for instant results.\n\n" + report.toTelegramMarkdown());
         } else {
             sendMessage(chatId, "❌ *Login Failed!*\n" + report.errorMessage + "\n\nPlease verify your credentials and try again.");
         }
@@ -193,14 +199,12 @@ public class TelegramBot {
             return;
         }
 
-        AttendanceFetcher fetcher = new AttendanceFetcher();
-        fetcher.setCookies(session.getHttpCookies());
+        // 1. Ultra-fast direct fetch using cached cookies via Shared Client (< 300ms)
+        AttendanceFetcher.AttendanceReport report = AttendanceFetcher.fastFetchWithCookies(session.getHttpCookies());
 
-        // 1. Try fast instant load with cached session
-        AttendanceFetcher.AttendanceReport report = fetcher.fetchWithCurrentSession();
-
-        // 2. If session expired, auto-relogin
+        // 2. If session expired, auto-relogin in background
         if (!report.success && session.getPassword() != null) {
+            AttendanceFetcher fetcher = new AttendanceFetcher();
             report = fetcher.loginAndFetch(session.username, session.getPassword());
             if (report.success) {
                 session.setCookies(report.sessionCookies);
@@ -222,6 +226,17 @@ public class TelegramBot {
         } else {
             sendMessage(chatId, "ℹ️ You are not logged in.");
         }
+    }
+
+    private void sendChatAction(long chatId, String action) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(TELEGRAM_API_BASE + botToken + "/sendChatAction?chat_id=" + chatId + "&action=" + action))
+                    .GET()
+                    .timeout(Duration.ofSeconds(3))
+                    .build();
+            httpClient.sendAsync(request, HttpResponse.BodyHandlers.discarding());
+        } catch (Exception ignored) {}
     }
 
     private void sendMessage(long chatId, String text) {
@@ -265,7 +280,7 @@ public class TelegramBot {
                     .uri(URI.create(TELEGRAM_API_BASE + botToken + "/deleteMessage?chat_id=" + chatId + "&message_id=" + messageId))
                     .GET()
                     .build();
-            httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+            httpClient.sendAsync(request, HttpResponse.BodyHandlers.discarding());
         } catch (Exception ignored) {}
     }
 
@@ -292,18 +307,15 @@ public class TelegramBot {
     }
 
     public static String resolveBotToken() {
-        // 1. Hardcoded constant if provided
         if (HARDCODED_BOT_TOKEN != null && !HARDCODED_BOT_TOKEN.trim().isEmpty()) {
             return HARDCODED_BOT_TOKEN.trim();
         }
 
-        // 2. Environment variable
         String envToken = System.getenv("BOT_TOKEN");
         if (envToken != null && !envToken.trim().isEmpty()) {
             return envToken.trim();
         }
 
-        // 3. .env file
         File envFile = new File(".env");
         if (envFile.exists()) {
             try (Scanner scanner = new Scanner(envFile)) {

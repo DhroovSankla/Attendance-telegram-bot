@@ -3,7 +3,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.OutputStream;
 import java.net.HttpCookie;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -14,6 +16,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+import com.sun.net.httpserver.HttpServer;
 
 public class TelegramBot {
 
@@ -319,11 +322,33 @@ public class TelegramBot {
         return null;
     }
 
+    private static void startHealthServer() {
+        try {
+            String portStr = System.getenv("PORT");
+            int port = (portStr != null && !portStr.isEmpty()) ? Integer.parseInt(portStr) : 10000;
+            HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
+            server.createContext("/", exchange -> {
+                String response = "CGC Attendance Bot is running healthy!";
+                exchange.sendResponseHeaders(200, response.length());
+                try (OutputStream os = exchange.getResponseBody()) {
+                    os.write(response.getBytes());
+                }
+            });
+            server.setExecutor(null);
+            server.start();
+            System.out.println("🌐 Health check server listening on port " + port);
+        } catch (Exception e) {
+            System.err.println("Note on health server: " + e.getMessage());
+        }
+    }
+
     public static void main(String[] args) {
+        startHealthServer();
+
         String token = resolveBotToken();
         if (token == null) {
             System.err.println("❌ ERROR: Telegram Bot Token not found!");
-            System.err.println("👉 Please paste your token inside .env (BOT_TOKEN=...) or set HARDCODED_BOT_TOKEN in TelegramBot.java.");
+            System.err.println("👉 Please set the BOT_TOKEN environment variable in Render / .env file.");
             return;
         }
 

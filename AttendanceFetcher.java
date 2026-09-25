@@ -210,9 +210,17 @@ public class AttendanceFetcher {
                     .POST(HttpRequest.BodyPublishers.ofString(formBody))
                     .build();
 
-            client.send(postLogin, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> postRes = client.send(postLogin, HttpResponse.BodyHandlers.ofString());
 
-            // 3. Fetch Attendance Page
+            // If the post request already redirected and loaded the dashboard, parse immediately!
+            if (postRes.statusCode() == 200 && isDashboardPage(postRes.body())) {
+                parseDashboard(postRes.body(), report);
+                report.success = true;
+                report.sessionCookies = cookieManager.getCookieStore().getCookies();
+                return report;
+            }
+
+            // 3. Otherwise, fetch Attendance Page directly
             HttpRequest getAttendancePage = HttpRequest.newBuilder()
                     .uri(URI.create(ATTENDANCE_PAGE_URL))
                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
@@ -227,7 +235,8 @@ public class AttendanceFetcher {
                 report.success = true;
                 report.sessionCookies = cookieManager.getCookieStore().getCookies();
                 return report;
-            } else {
+            }
+ else {
                 report.success = false;
                 report.errorMessage = "Login failed. Please check your Roll Number and Password.";
                 return report;

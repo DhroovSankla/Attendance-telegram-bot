@@ -177,9 +177,14 @@ public class TelegramBot {
         String pass = parts[2];
 
         sendChatAction(chatId, "typing");
+        sendMessage(chatId, "🔄 *Logging in to CGC Portal... Please wait.*");
 
+        long start = System.currentTimeMillis();
         AttendanceFetcher fetcher = new AttendanceFetcher();
         AttendanceFetcher.AttendanceReport report = fetcher.loginAndFetch(roll, pass);
+        long elapsed = System.currentTimeMillis() - start;
+
+        System.out.println("⏱️ [Chat " + chatId + "] Initial login finished in " + elapsed + "ms (Success: " + report.success + ")");
 
         if (report.success) {
             UserSession session = new UserSession(roll, pass, report.sessionCookies);
@@ -199,16 +204,28 @@ public class TelegramBot {
             return;
         }
 
+        long start = System.currentTimeMillis();
+
         // 1. Ultra-fast direct fetch using cached cookies via Shared Client (< 300ms)
         AttendanceFetcher.AttendanceReport report = AttendanceFetcher.fastFetchWithCookies(session.getHttpCookies());
 
+        if (report.success) {
+            long elapsed = System.currentTimeMillis() - start;
+            System.out.println("⚡ [Chat " + chatId + "] Fast cookie fetch took " + elapsed + "ms");
+            sendMessage(chatId, report.toTelegramMarkdown());
+            return;
+        }
+
         // 2. If session expired, auto-relogin in background
-        if (!report.success && session.getPassword() != null) {
+        if (session.getPassword() != null) {
+            System.out.println("🔄 [Chat " + chatId + "] Session expired. Auto re-logging in...");
             AttendanceFetcher fetcher = new AttendanceFetcher();
             report = fetcher.loginAndFetch(session.username, session.getPassword());
             if (report.success) {
                 session.setCookies(report.sessionCookies);
                 saveUserSessions();
+                long elapsed = System.currentTimeMillis() - start;
+                System.out.println("✅ [Chat " + chatId + "] Auto re-login completed in " + elapsed + "ms");
             }
         }
 

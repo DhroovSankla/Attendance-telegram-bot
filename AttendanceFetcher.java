@@ -54,6 +54,7 @@ public class AttendanceFetcher {
         public boolean success;
         public String errorMessage;
         public String overallPct;
+        public String todayDate;
         public List<Lecture> lectures = new ArrayList<>();
         public List<HttpCookie> sessionCookies = new ArrayList<>();
 
@@ -66,10 +67,19 @@ public class AttendanceFetcher {
             sb.append("📊 *CGC Attendance Report*\n");
             sb.append("━━━━━━━━━━━━━━━━━━━━━\n");
             sb.append("📈 *Overall Attendance:* `").append(overallPct).append("`\n\n");
-            sb.append("📅 *Today's Schedule:*\n");
+            
+            sb.append("📅 *Today's Schedule");
+            if (todayDate != null && !todayDate.isEmpty()) {
+                sb.append(" (").append(todayDate).append(")");
+            }
+            sb.append(":*\n");
 
             if (lectures.isEmpty()) {
-                sb.append("ℹ️ _No classes scheduled for today._\n");
+                sb.append("ℹ️ _No classes scheduled for today");
+                if (todayDate != null && !todayDate.isEmpty()) {
+                    sb.append(" (").append(todayDate).append(")");
+                }
+                sb.append("._\n");
             } else {
                 for (Lecture l : lectures) {
                     String statusEmoji = l.status.equalsIgnoreCase("Present") ? "✅ Present" : "❌ Absent";
@@ -134,9 +144,11 @@ public class AttendanceFetcher {
 
             if (res.statusCode() == 200 && isDashboardPage(body)) {
                 parseDashboardStatic(body, report);
-                report.success = true;
-                report.sessionCookies = cookies;
-                return report;
+                if (report.overallPct != null && !report.overallPct.equals("N/A")) {
+                    report.success = true;
+                    report.sessionCookies = cookies;
+                    return report;
+                }
             }
         } catch (Exception e) {
             report.errorMessage = "Fast fetch error: " + e.getMessage();
@@ -160,9 +172,11 @@ public class AttendanceFetcher {
 
             if (res.statusCode() == 200 && isDashboardPage(body)) {
                 parseDashboard(body, report);
-                report.success = true;
-                report.sessionCookies = cookieManager.getCookieStore().getCookies();
-                return report;
+                if (report.overallPct != null && !report.overallPct.equals("N/A")) {
+                    report.success = true;
+                    report.sessionCookies = cookieManager.getCookieStore().getCookies();
+                    return report;
+                }
             }
         } catch (Exception e) {
             report.errorMessage = "Network error: " + e.getMessage();
@@ -240,7 +254,13 @@ public class AttendanceFetcher {
     }
 
     private static boolean isDashboardPage(String html) {
-        return html.contains("Attendance") && (html.contains("Overall") || html.contains("%") || html.contains("Subject"));
+        if (html == null || html.isEmpty()) return false;
+        if (html.contains("txtuser") || html.contains("txtpass") || html.contains("btnLogin") || html.contains("Login.aspx")) {
+            return false;
+        }
+        return (html.contains("Your Attendance") || html.contains("Overall Attendance") || 
+                html.contains("Till Yesterday") || html.contains("Attendance.aspx") ||
+                (html.contains("Today") && html.contains("%")));
     }
 
     private void parseDashboard(String html, AttendanceReport report) {
@@ -261,13 +281,29 @@ public class AttendanceFetcher {
 
         // 2. Today's Lectures
         Element todayContainer = null;
-        for (Element el : doc.select("div, col, section, td, th")) {
+        for (Element el : doc.select("div, col, section, td, th, h1, h2, h3, h4, h5, h6, span, p")) {
             String text = el.ownText().trim();
-            if (text.equalsIgnoreCase("Today") || (el.text().startsWith("Today") && el.text().length() < 30)) {
+            if (text.equalsIgnoreCase("Today") || (text.startsWith("Today") && text.length() < 30)) {
                 todayContainer = el.parent();
                 break;
             }
         }
+
+        // Extract Date for Today (e.g. 26 Sep 2026)
+        String todayDate = null;
+        if (todayContainer != null) {
+            Matcher dateMatcher = Pattern.compile("(\\d{1,2}\\s+[A-Za-z]{3}\\s+\\d{4})").matcher(todayContainer.text());
+            if (dateMatcher.find()) {
+                todayDate = dateMatcher.group(1).trim();
+            }
+        }
+        if (todayDate == null) {
+            Matcher dateMatcher = Pattern.compile("Today.*?(\\d{1,2}\\s+[A-Za-z]{3}\\s+\\d{4})", Pattern.DOTALL | Pattern.CASE_INSENSITIVE).matcher(doc.text());
+            if (dateMatcher.find()) {
+                todayDate = dateMatcher.group(1).trim();
+            }
+        }
+        report.todayDate = todayDate;
 
         Elements searchScope = (todayContainer != null) ? todayContainer.getAllElements() : doc.getAllElements();
         Set<String> seenLectures = new LinkedHashSet<>();
